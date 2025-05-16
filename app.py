@@ -11,7 +11,9 @@ import os
 import requests
 import subprocess
 import shlex
-
+st.set_page_config(
+        page_title="Educative MI Chat Viewer",
+)
 # Initialize session state variables if they don't exist
 if 'auth_header' not in st.session_state:
     st.session_state.auth_header = ''
