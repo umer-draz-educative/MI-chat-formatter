@@ -4,6 +4,7 @@ import json
 import base64
 from io import BytesIO
 import tempfile
+import os  # Add this import for os.chmod and os.path functions
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, ListItem, ListFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
