@@ -5,15 +5,15 @@ import base64
 from io import BytesIO
 import tempfile
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
-from reportlab.lib.styles import getSampleStyleSheet
-import os
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, ListItem, ListFlowable
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+import markdown
+import re
 import requests
 import subprocess
 import shlex
-st.set_page_config(
-        page_title="Educative MI Chat Viewer",
-)
+
 # Initialize session state variables if they don't exist
 if 'auth_header' not in st.session_state:
     st.session_state.auth_header = ''
@@ -44,10 +44,45 @@ st.title("MI Viewer")
 tab1, tab2 = st.tabs(["Paste JSON", "Fetch from API"])
 
 # Function to process and display chat data
-def process_chat_data(data):
+def process_chat_data(data, source="JSON"):
     # Create a list to store content for PDF
     pdf_content = []
     styles = getSampleStyleSheet()
+    
+    # Add custom styles for markdown elements
+    styles.add(ParagraphStyle(
+        name='Code',
+        parent=styles['Normal'],
+        fontName='Courier',
+        fontSize=9,
+        backColor=colors.lightgrey,
+        leftIndent=20,
+        rightIndent=20
+    ))
+    
+    # Add API information to the top of PDF if fetched from API
+    if source == "API":
+        # Add API information header
+        pdf_content.append(Paragraph("<b>API Information:</b>", styles["Heading2"]))
+        api_info = [
+            f"Category: {st.session_state.category}",
+            f"MI ID: {st.session_state.mi_id}",
+            f"User ID: {st.session_state.user_id}",
+            f"Session Number: {st.session_state.session_num}",
+            f"API URL: https://www.educative.io/api/user/mock-interview/{st.session_state.category}/{st.session_state.mi_id}/{st.session_state.user_id}/{st.session_state.session_num}"
+        ]
+        
+        # Add message count if available
+        if "chat" in data:
+            api_info.append(f"Number of Messages: {len(data['chat'])}")
+        
+        # Add each info line
+        for info in api_info:
+            pdf_content.append(Paragraph(info, styles["Normal"]))
+        
+        # Add spacer
+        pdf_content.append(Spacer(1, 20))
+        pdf_content.append(Paragraph("<b>Conversation:</b>", styles["Heading2"]))
     
     # Display chat messages
     if "chat" in data:
@@ -69,7 +104,95 @@ def process_chat_data(data):
                 
                 if content_type == "text" or is_ai:
                     st.markdown(content)
-                    pdf_content.append(Paragraph(content, styles["Normal"]))
+                    
+                    # Process markdown for PDF
+                    # Handle lists
+                    list_items = []
+                    in_list = False
+                    list_type = None
+                    paragraphs = []
+                    
+                    for line in content.split('\n'):
+                        # Check for code blocks
+                        if line.strip().startswith('```') or line.strip().startswith('~~~'):
+                            if in_list and list_items:
+                                # End the current list before code block
+                                if list_type == 'ul':
+                                    paragraphs.append(ListFlowable(list_items, bulletType='bullet'))
+                                else:
+                                    paragraphs.append(ListFlowable(list_items, bulletType='1'))
+                                list_items = []
+                                in_list = False
+                            
+                            # Handle code block
+                            paragraphs.append(Paragraph(line, styles["Code"]))
+                            continue
+                            
+                        # Check for list items
+                        ul_match = re.match(r'^\s*[\*\-\+]\s+(.+)$', line)
+                        ol_match = re.match(r'^\s*\d+\.\s+(.+)$', line)
+                        
+                        if ul_match:
+                            if not in_list or list_type != 'ul':
+                                # End previous list if it was a different type
+                                if in_list and list_items:
+                                    if list_type == 'ol':
+                                        paragraphs.append(ListFlowable(list_items, bulletType='1'))
+                                    list_items = []
+                                in_list = True
+                                list_type = 'ul'
+                            list_items.append(ListItem(Paragraph(ul_match.group(1), styles["Normal"])))
+                        elif ol_match:
+                            if not in_list or list_type != 'ol':
+                                # End previous list if it was a different type
+                                if in_list and list_items:
+                                    if list_type == 'ul':
+                                        paragraphs.append(ListFlowable(list_items, bulletType='bullet'))
+                                    list_items = []
+                                in_list = True
+                                list_type = 'ol'
+                            list_items.append(ListItem(Paragraph(ol_match.group(1), styles["Normal"])))
+                        else:
+                            # Regular paragraph - end any current list
+                            if in_list and list_items:
+                                if list_type == 'ul':
+                                    paragraphs.append(ListFlowable(list_items, bulletType='bullet'))
+                                else:
+                                    paragraphs.append(ListFlowable(list_items, bulletType='1'))
+                                list_items = []
+                                in_list = False
+                            
+                            # Skip empty lines
+                            if line.strip():
+                                # Handle headers
+                                header_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+                                if header_match:
+                                    level = len(header_match.group(1))
+                                    header_text = header_match.group(2)
+                                    style_name = f"Heading{min(level+1, 6)}"
+                                    paragraphs.append(Paragraph(header_text, styles[style_name]))
+                                else:
+                                    # Handle bold and italic
+                                    line = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', line)
+                                    line = re.sub(r'\*(.+?)\*', r'<i>\1</i>', line)
+                                    line = re.sub(r'\_\_(.+?)\_\_', r'<b>\1</b>', line)
+                                    line = re.sub(r'\_(.+?)\_', r'<i>\1</i>', line)
+                                    
+                                    # Handle inline code
+                                    line = re.sub(r'`(.+?)`', r'<font face="Courier" size="9">\1</font>', line)
+                                    
+                                    paragraphs.append(Paragraph(line, styles["Normal"]))
+                    
+                    # Add any remaining list items
+                    if in_list and list_items:
+                        if list_type == 'ul':
+                            paragraphs.append(ListFlowable(list_items, bulletType='bullet'))
+                        else:
+                            paragraphs.append(ListFlowable(list_items, bulletType='1'))
+                    
+                    # Add all paragraphs to PDF content
+                    pdf_content.extend(paragraphs)
+                    
                 elif content_type == "image" and not is_ai:
                     # Display base64 image
                     try:
@@ -128,7 +251,7 @@ with tab1:
             try:
                 # Parse JSON
                 data = json.loads(json_input)
-                process_chat_data(data)
+                process_chat_data(data, source="JSON")
             except json.JSONDecodeError:
                 st.error("Invalid JSON format. Please check your input.")
             except Exception as e:
@@ -304,7 +427,7 @@ with tab2:
                 if response.status_code == 200:
                     data = response.json()
                     st.success("Data fetched successfully!")
-                    process_chat_data(data)
+                    process_chat_data(data, source="API")
                 else:
                     st.error(f"API request failed with status code {response.status_code}")
                     st.text(f"Response: {response.text}")
