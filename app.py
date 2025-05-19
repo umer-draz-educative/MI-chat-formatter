@@ -50,16 +50,17 @@ def process_chat_data(data, source="JSON"):
     pdf_content = []
     styles = getSampleStyleSheet()
     
-    # Add custom styles for markdown elements
-    styles.add(ParagraphStyle(
-        name='Code',
-        parent=styles['Normal'],
-        fontName='Courier',
-        fontSize=9,
-        backColor=colors.lightgrey,
-        leftIndent=20,
-        rightIndent=20
-    ))
+    # Add custom styles for markdown elements (only if they don't exist)
+    if 'Code' not in styles:
+        styles.add(ParagraphStyle(
+            name='Code',
+            parent=styles['Normal'],
+            fontName='Courier',
+            fontSize=9,
+            backColor=colors.lightgrey,
+            leftIndent=20,
+            rightIndent=20
+        ))
     
     # Add API information to the top of PDF if fetched from API
     if source == "API":
